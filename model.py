@@ -22,7 +22,7 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F
-
+from torch_cluster import knn_graph
 
 def knn(x, k):
     inner = -2*torch.matmul(x.transpose(2, 1), x)
@@ -33,15 +33,35 @@ def knn(x, k):
     return idx
 
 
+def knn_cluster(x, k):
+    batch_size = x.shape[0]
+    dim = x.shape[1]
+    num_points = x.shape[2]
+
+    x = x.permute(0, 2, 1).contiguous().view(-1, dim)
+    batch = torch.arange(batch_size, dtype=torch.long, device=x.device)
+    batch = batch.view(-1, 1).repeat(1, num_points).view(-1)
+
+    edge_index = knn_graph(x, k=k, batch=batch, loop=True)  # include self loops
+    source, target = edge_index
+    assert torch.equal(target, torch.sort(target)[0])
+
+    source = source.view(batch_size, num_points, k)
+    offset = torch.arange(batch_size, dtype=torch.long, device=x.device) * num_points
+    offset = offset.view(-1, 1, 1)
+    source = source - offset
+
+    return source
 def get_graph_feature(x, k=20, idx=None, dim9=False):
     batch_size = x.size(0)
     num_points = x.size(2)
     x = x.view(batch_size, -1, num_points)
-    if idx is None:
-        if dim9 == False:
-            idx = knn(x, k=k)   # (batch_size, num_points, k)
-        else:
-            idx = knn(x[:, 6:], k=k)
+    with torch.no_grad():
+        if idx is None:
+            if dim9 == False:
+                idx = knn_cluster(x, k=k)   # (batch_size, num_points, k)
+            else:
+                idx = knn_cluster(x[:, 6:], k=k)
     device = torch.device('cuda')
 
     idx_base = torch.arange(0, batch_size, device=device).view(-1, 1, 1)*num_points

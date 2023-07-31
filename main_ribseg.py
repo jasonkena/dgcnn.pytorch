@@ -17,7 +17,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR, StepLR
 from data import ShapeNetPart
-from ribseg_dataset import RibSegDataset
 from model import DGCNN_partseg
 import numpy as np
 from torch.utils.data import DataLoader
@@ -26,6 +25,10 @@ import sklearn.metrics as metrics
 from plyfile import PlyData, PlyElement
 from tqdm import tqdm
 import wandb
+
+import sys
+sys.path.insert(1, os.path.join(sys.path[0], '..'))
+from ribseg_dataset import RibSegDataset
 
 global class_cnts
 class_indexs = np.zeros((16,), dtype=int)
@@ -143,13 +146,13 @@ def visualization(visu, visu_format, data, pred, seg, label, partseg_colors, cla
 def train(args, io):
     print(f"PID: {os.getpid()}")
     # train_dataset = ShapeNetPart(partition='trainval', num_points=args.num_points, class_choice=args.class_choice)
-    train_dataset = RibSegDataset(root="../ribseg_benchmark", split="train", npoints=args.num_points)
+    train_dataset = RibSegDataset(root=args.dataset_path, split="train", npoints=args.num_points, binary_root = args.binary_dataset_path)
     if (len(train_dataset) < 100):
         drop_last = False
     else:
         drop_last = True
     train_loader = DataLoader(train_dataset, num_workers=48, batch_size=args.batch_size, shuffle=True, drop_last=drop_last)#, pin_memory=True)
-    test_loader = DataLoader(RibSegDataset(root="../ribseg_benchmark", split="val", npoints=args.num_points), 
+    test_loader = DataLoader(RibSegDataset(root=args.dataset_path, split="val", npoints=args.num_points, binary_root = args.binary_dataset_path),
                             num_workers=48, batch_size=args.test_batch_size, shuffle=True, drop_last=False)#, pin_memory=True)
     
     device = torch.device("cuda" if args.cuda else "cpu")
@@ -198,7 +201,8 @@ def train(args, io):
         train_true_seg = []
         train_pred_seg = []
         train_label_seg = []
-        for data, label, seg in tqdm(train_loader):
+        for data, seg in tqdm(train_loader):
+            label = np.zeros(seg.shape[0], dtype=int)
             seg = seg - seg_start_index
             if args.binary:
                 seg = (seg>0).to(seg.dtype)
@@ -265,7 +269,8 @@ def train(args, io):
             test_true_seg = []
             test_pred_seg = []
             test_label_seg = []
-            for data, label, seg in tqdm(test_loader):
+            for data, seg in tqdm(test_loader):
+                label = np.zeros(seg.shape[0], dtype=int)
                 seg = seg - seg_start_index
                 if args.binary:
                     seg = (seg>0).to(seg.dtype)
@@ -414,6 +419,8 @@ if __name__ == "__main__":
                         help='Num of nearest neighbors to use')
     parser.add_argument('--model_path', type=str, default='', metavar='N',
                         help='Pretrained model path')
+    parser.add_argument('--dataset_path', type=str, default='', metavar='N')
+    parser.add_argument('--binary_dataset_path', type=str, default='', metavar='N')
     parser.add_argument('--visu', type=str, default='',
                         help='visualize the model')
     parser.add_argument('--visu_format', type=str, default='ply',
